@@ -10,11 +10,12 @@ h1 {
 
 .add {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .add input {
-  flex: 1;
+  flex: 1 1 100%;
 }
 
 input:not([type='checkbox']) {
@@ -61,14 +62,29 @@ button.link.danger {
   border-bottom: 1px solid var(--border);
 }
 
-.todo .title {
+.todo .body {
   flex: 1;
+  min-width: 0;
+}
+
+.todo .title {
   cursor: text;
 }
 
 .todo .edit {
-  flex: 1;
+  width: 100%;
   padding: 4px 8px;
+}
+
+.todo .description,
+.todo .meta {
+  margin: 2px 0 0;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.todo .meta {
+  font-size: 0.75rem;
 }
 
 .todo.done .title {
