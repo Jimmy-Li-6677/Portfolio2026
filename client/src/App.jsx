@@ -1,182 +1,174 @@
 import { useEffect, useState } from 'react'
-import { getHello, getTodos, createTodo, updateTodo, deleteTodo } from './api'
+import { getIssues, createIssue, updateIssue, deleteIssue } from './api'
+import { STATUSES, PRIORITIES } from './constants'
+import IssueForm from './components/IssueForm'
+import IssuePanel from './components/IssuePanel'
+import IssueRow from './components/IssueRow'
 import './App.css'
 
-function TodoItem({ todo, onToggle, onRename, onDelete }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(todo.title)
+const EMPTY_FILTERS = { q: '', teamID: '', priority: '', assignee: '' }
 
-  const save = () => {
-    const title = draft.trim()
-    if (title && title !== todo.title) onRename(todo.taskId, title)
-    else setDraft(todo.title)
-    setEditing(false)
+// Remember who is using the app so "Creator" is pre-filled. Storage can be unavailable (private mode).
+const ME_KEY = 'issue-tracker:me'
+const loadMe = () => {
+  try {
+    return localStorage.getItem(ME_KEY) || ''
+  } catch {
+    return ''
   }
-
-  return (
-    <li className={todo.completed ? 'todo done' : 'todo'}>
-      <input
-        type="checkbox"
-        checked={todo.completed}
-        onChange={() => onToggle(todo)}
-        aria-label={`Mark "${todo.title}" as ${todo.completed ? 'not done' : 'done'}`}
-      />
-      <div className="body">
-        {editing ? (
-          <input
-            className="edit"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={save}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') save()
-              if (e.key === 'Escape') {
-                setDraft(todo.title)
-                setEditing(false)
-              }
-            }}
-          />
-        ) : (
-          <span className="title" onDoubleClick={() => setEditing(true)}>
-            {todo.title}
-          </span>
-        )}
-        {todo.description && <p className="description">{todo.description}</p>}
-        <p className="meta">
-          #{todo.taskId.slice(-6)} · by {todo.createdBy} ·{' '}
-          {new Date(todo.createdAt).toLocaleString()}
-        </p>
-      </div>
-      <button className="link" onClick={() => setEditing(true)}>Edit</button>
-      <button className="link danger" onClick={() => onDelete(todo.taskId)}>Delete</button>
-    </li>
-  )
+}
+const saveMe = (name) => {
+  try {
+    localStorage.setItem(ME_KEY, name)
+  } catch {
+    // ignore
+  }
 }
 
 function App() {
-  const [todos, setTodos] = useState([])
-  const [title, setTitle] = useState('')
-  const [description, setDescription] = useState('')
-  const [createdBy, setCreatedBy] = useState('')
+  const [issues, setIssues] = useState([])
+  const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [hello, setHello] = useState(null)
+  // What the side panel shows: null, { mode: 'create', defaults } or { mode: 'edit', identifier }
+  const [panel, setPanel] = useState(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  const handleHello = () =>
-    run(async () => {
-      const data = await getHello('Jimmy')
-      setHello(data)
-    })
-
+  // Re-fetch when filters change or after any create/update/delete.
+  // The short delay avoids a request on every keystroke in the search box.
   useEffect(() => {
-    getTodos()
-      .then(setTodos)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false))
-  }, [])
+    const timer = setTimeout(() => {
+      getIssues(filters)
+        .then(setIssues)
+        .catch((err) => setError(err.message))
+        .finally(() => setLoading(false))
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [filters, refreshKey])
 
-  // Run an API call and surface any error in the UI
+  const refresh = () => setRefreshKey((k) => k + 1)
+
+  // Run an API call and reload the list afterwards. Errors are re-thrown so the caller decides
+  // where to show them: forms show their own, list actions use the banner.
   const run = async (fn) => {
     setError('')
-    try {
-      await fn()
-    } catch (err) {
-      setError(err.message)
-    }
+    await fn()
+    refresh()
   }
+  const showError = (err) => setError(err.message)
 
-  const handleAdd = (e) => {
-    e.preventDefault()
-    if (!title.trim() || !createdBy.trim()) {
-      setError('Please enter a task and who created it')
-      return
-    }
-    run(async () => {
-      const todo = await createTodo({ title, description, createdBy })
-      setTodos((prev) => [...prev, todo])
-      // Keep createdBy filled in so the same person can add several tasks
-      setTitle('')
-      setDescription('')
-    })
-  }
+  const setFilter = (field) => (e) => setFilters((prev) => ({ ...prev, [field]: e.target.value }))
 
-  const handleToggle = (todo) =>
+  const openCreate = (defaults = {}) =>
+    setPanel({ mode: 'create', defaults: { creator: loadMe(), teamID: 'ENG', ...defaults } })
+
+  const handleCreate = (values) =>
     run(async () => {
-      const updated = await updateTodo(todo.taskId, { completed: !todo.completed })
-      setTodos((prev) => prev.map((t) => (t.taskId === updated.taskId ? updated : t)))
+      const issue = await createIssue(values)
+      saveMe(values.creator)
+      setPanel({ mode: 'edit', identifier: issue.identifier })
     })
 
-  const handleRename = (id, newTitle) =>
-    run(async () => {
-      const updated = await updateTodo(id, { title: newTitle })
-      setTodos((prev) => prev.map((t) => (t.taskId === updated.taskId ? updated : t)))
-    })
+  const handleSave = (identifier, changes) => run(() => updateIssue(identifier, changes))
 
-  const handleDelete = (id) =>
-    run(async () => {
-      await deleteTodo(id)
-      setTodos((prev) => prev.filter((t) => t.taskId !== id))
-    })
+  const handleStatusChange = (issue, status) =>
+    run(() => updateIssue(issue.identifier, { status })).catch(showError)
 
-  const remaining = todos.filter((t) => !t.completed).length
+  const handleDelete = (identifier) =>
+    run(async () => {
+      await deleteIssue(identifier)
+      setPanel(null)
+    }).catch(showError)
+
+  const hasFilters = Object.values(filters).some(Boolean)
 
   return (
-    <main className="app">
-      <h1>Todo List</h1>
+    <div className={panel ? 'layout with-panel' : 'layout'}>
+      <main className="main">
+        <header className="top-bar">
+          <h1>Issues</h1>
+          <button onClick={() => openCreate()}>+ New issue</button>
+        </header>
 
-      <button onClick={handleHello}>Say hello to the server</button>
-      {hello && (
-        <p className="muted">
-          {hello.message} (server time: {hello.serverTime})
-        </p>
-      )}
-
-      <form className="add" onSubmit={handleAdd}>
-        <input
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder="What needs to be done?"
-          aria-label="Task"
-        />
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder="What is it for? (optional)"
-          aria-label="What the task is for"
-        />
-        <input
-          value={createdBy}
-          onChange={(e) => setCreatedBy(e.target.value)}
-          placeholder="Your name"
-          aria-label="Created by"
-        />
-        <button type="submit">Add</button>
-      </form>
-
-      {error && <p className="error">{error}</p>}
-
-      {loading ? (
-        <p className="muted">Loading…</p>
-      ) : todos.length === 0 ? (
-        <p className="muted">No todos yet. Add one above.</p>
-      ) : (
-        <>
-          <ul className="list">
-            {todos.map((todo) => (
-              <TodoItem
-                key={todo.taskId}
-                todo={todo}
-                onToggle={handleToggle}
-                onRename={handleRename}
-                onDelete={handleDelete}
-              />
+        <div className="filters">
+          <input value={filters.q} onChange={setFilter('q')} placeholder="Search…" aria-label="Search" />
+          <input value={filters.teamID} onChange={setFilter('teamID')} placeholder="Team" aria-label="Team" />
+          <select value={filters.priority} onChange={setFilter('priority')} aria-label="Priority">
+            <option value="">Any priority</option>
+            {PRIORITIES.map((p) => (
+              <option key={p.value} value={p.value}>{p.label}</option>
             ))}
-          </ul>
-          <p className="muted">{remaining} of {todos.length} remaining</p>
-        </>
+          </select>
+          <input value={filters.assignee} onChange={setFilter('assignee')} placeholder="Assignee" aria-label="Assignee" />
+          {hasFilters && (
+            <button className="link" onClick={() => setFilters(EMPTY_FILTERS)}>Clear</button>
+          )}
+        </div>
+
+        {error && <p className="error">{error}</p>}
+
+        {loading ? (
+          <p className="muted">Loading…</p>
+        ) : issues.length === 0 ? (
+          <p className="muted empty">
+            {hasFilters ? 'No issues match these filters.' : 'No issues yet. Create your first one.'}
+          </p>
+        ) : (
+          STATUSES.map((status) => {
+            const group = issues.filter((issue) => issue.status === status.value)
+            if (group.length === 0) return null
+            return (
+              <section key={status.value} className="group">
+                <h2 className={`group-title status-${status.value}`}>
+                  {status.label} <span className="count">{group.length}</span>
+                </h2>
+                <ul className="issue-list">
+                  {group.map((issue) => (
+                    <IssueRow
+                      key={issue.identifier}
+                      issue={issue}
+                      onOpen={(identifier) => setPanel({ mode: 'edit', identifier })}
+                      onStatusChange={handleStatusChange}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )
+          })
+        )}
+      </main>
+
+      {panel?.mode === 'create' && (
+        <aside className="panel" aria-label="New issue">
+          <header className="panel-header">
+            <h2>New issue</h2>
+            <button className="icon" onClick={() => setPanel(null)} aria-label="Close">×</button>
+          </header>
+          <IssueForm
+            key={JSON.stringify(panel.defaults)}
+            initial={panel.defaults}
+            isNew
+            submitLabel="Create issue"
+            onSubmit={handleCreate}
+            onCancel={() => setPanel(null)}
+          />
+        </aside>
       )}
-    </main>
+
+      {panel?.mode === 'edit' && (
+        <IssuePanel
+          identifier={panel.identifier}
+          refreshKey={refreshKey}
+          onSave={handleSave}
+          onDelete={handleDelete}
+          onOpen={(identifier) => setPanel({ mode: 'edit', identifier })}
+          onAddSubIssue={(parent) =>
+            openCreate({ teamID: parent.teamID, parentIssue: parent.identifier })
+          }
+          onClose={() => setPanel(null)}
+        />
+      )}
+    </div>
   )
 }
 

@@ -6,6 +6,7 @@
   --border: #d9dce1;
   --accent: #2563eb;
   --danger: #dc2626;
+  --hover: #f3f4f6;
 
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
@@ -20,6 +21,7 @@
     --border: #343842;
     --accent: #3b82f6;
     --danger: #f87171;
+    --hover: #262a31;
   }
 }
 
